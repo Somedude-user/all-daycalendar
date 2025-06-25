@@ -1,73 +1,139 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="utf-8">
+  <meta charset="utf-8" />
   <title>Koko päivän ja pitkät tapahtumat</title>
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://apis.google.com/js/api.js"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 1em; }
+    button { padding: 0.5em 1em; font-size: 1em; margin-top: 1em; }
+    ul { margin-top: 1em; }
+  </style>
 </head>
 <body>
   <h2>Koko päivän ja pitkät tapahtumat</h2>
-  <div id="g_id_onload"
-       data-client_id="369148508096-2i2l04iqj26c1sf3p68ktjlnptgel90t.apps.googleusercontent.com"
-       data-callback="handleCredentialResponse"
-       data-auto_prompt="false">
-  </div>
-  <div class="g_id_signin" data-type="standard"></div>
+
+  <button id="authorize_button" style="display:none">Kirjaudu Googleen</button>
+  <button id="signout_button" style="display:none">Kirjaudu ulos</button>
 
   <ul id="events"></ul>
 
   <script>
+    const CLIENT_ID = '369148508096-2i2l04iqj26c1sf3p68ktjlnptgel90t.apps.googleusercontent.com';
     const API_KEY = 'AIzaSyA8I155Js5gNoCQc3vwyF6PlViagRU4QNk';
+    const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
+    const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest';
 
-    function handleCredentialResponse(response) {
-      // Alustetaan GAPI ja käytetään saatua tunnistetta
-      gapi.load('client', async () => {
-        await gapi.client.init({
-          apiKey: API_KEY,
-          discoveryDocs: ["https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest"],
-        });
+    let tokenClient;
+    let gapiInited = false;
+    let gisInited = false;
 
-        // Asetetaan OAuth-tokeniksi GIS:n palauttama id_token
-        gapi.client.setToken({access_token: response.credential});
+    const authorizeButton = document.getElementById('authorize_button');
+    const signoutButton = document.getElementById('signout_button');
+    const eventsList = document.getElementById('events');
 
-        listUpcomingEvents();
-      });
+    // Ladataan GAPI client
+    function gapiLoaded() {
+      gapi.load('client', initializeGapiClient);
     }
 
+    async function initializeGapiClient() {
+      await gapi.client.init({
+        apiKey: API_KEY,
+        discoveryDocs: [DISCOVERY_DOC],
+      });
+      gapiInited = true;
+      maybeEnableButtons();
+    }
+
+    // Init Google Identity Services token client
+    function gisLoaded() {
+      tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: CLIENT_ID,
+        scope: SCOPES,
+        callback: (tokenResponse) => {
+          if (tokenResponse.error) {
+            console.error('Token error:', tokenResponse);
+            return;
+          }
+          // Aseta access token GAPI clientille
+          gapi.client.setToken({ access_token: tokenResponse.access_token });
+          listUpcomingEvents();
+          authorizeButton.style.display = 'none';
+          signoutButton.style.display = 'inline-block';
+        },
+      });
+      gisInited = true;
+      maybeEnableButtons();
+    }
+
+    // Näytetään kirjautumisnappi kun kaikki on valmista
+    function maybeEnableButtons() {
+      if (gapiInited && gisInited) {
+        authorizeButton.style.display = 'inline-block';
+      }
+    }
+
+    authorizeButton.onclick = () => {
+      tokenClient.requestAccessToken();
+    };
+
+    signoutButton.onclick = () => {
+      // Poistetaan token ja näytetään kirjautumisnappi uudelleen
+      gapi.client.setToken(null);
+      eventsList.innerHTML = '';
+      authorizeButton.style.display = 'inline-block';
+      signoutButton.style.display = 'none';
+    };
+
+    // Haetaan tulevat tapahtumat ja suodatetaan koko päivän ja monipäiväiset
     function listUpcomingEvents() {
-      const timeNow = (new Date()).toISOString();
+      const now = new Date().toISOString();
       gapi.client.calendar.events.list({
         calendarId: 'primary',
-        timeMin: timeNow,
+        timeMin: now,
         showDeleted: false,
         singleEvents: true,
         maxResults: 50,
-        orderBy: 'startTime'
+        orderBy: 'startTime',
       }).then(response => {
         const events = response.result.items;
-        const list = document.getElementById('events');
-        list.innerHTML = '';
+        eventsList.innerHTML = '';
 
-        if (events.length > 0) {
-          events.forEach(event => {
-            const start = event.start.dateTime || event.start.date;
-            const end = event.end.dateTime || event.end.date;
-
-            const isAllDay = !!event.start.date;
-            const isMultiDay = new Date(end) - new Date(start) > 24 * 60 * 60 * 1000;
-
-            if (isAllDay || isMultiDay) {
-              const li = document.createElement('li');
-              li.textContent = `${event.summary} (${start} - ${end})`;
-              list.appendChild(li);
-            }
-          });
-        } else {
-          list.innerHTML = '<li>Ei tulevia koko päivän tapahtumia.</li>';
+        if (!events || events.length === 0) {
+          eventsList.innerHTML = '<li>Ei tulevia koko päivän tai pidempiä tapahtumia.</li>';
+          return;
         }
+
+        events.forEach(event => {
+          const start = event.start.dateTime || event.start.date;
+          const end = event.end.dateTime || event.end.date;
+
+          const isAllDay = !!event.start.date;
+          const isMultiDay = (new Date(end) - new Date(start)) > 24 * 60 * 60 * 1000;
+
+          if (isAllDay || isMultiDay) {
+            const li = document.createElement('li');
+            li.textContent = `${event.summary} (${start} - ${end})`;
+            eventsList.appendChild(li);
+          }
+        });
+
+        if (eventsList.children.length === 0) {
+          eventsList.innerHTML = '<li>Ei tulevia koko päivän tai pidempiä tapahtumia.</li>';
+        }
+      }, err => {
+        console.error('Error fetching events:', err);
+        eventsList.innerHTML = '<li>Tapahtumien hakeminen epäonnistui.</li>';
       });
     }
+
+    // Ladataan kirjastot kun sivu latautuu
+    window.onload = () => {
+      gapiLoaded();
+      gisLoaded();
+    };
   </script>
 </body>
-</html
+</html>
