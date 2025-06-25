@@ -21,24 +21,50 @@
     .error { color: red; }
     .loading { color: gray; }
   </style>
-  <!-- Define JavaScript logic before loading external scripts -->
+</head>
+<body>
+  <h2>Koko päivän ja pitkät tapahtumat</h2>
+  <div id="auth-buttons">
+    <button id="authorize_button" style="display: none;">Kirjaudu Googleen</button>
+    <button id="signout_button" style="display: none;">Kirjaudu ulos</button>
+  </div>
+  <div id="status"></div>
+  <ul id="events"></ul>
+
   <script>
     // Configuration
     const CLIENT_ID = '369148508096-2i2l04iqj26c1sf3p68ktjlnptgel90t.apps.googleusercontent.com';
-    const API_KEY = 'AIzaSyAqnqCSa-fWkD1O8KGZyZmgJPBVtgRZ61g';
+    const API_KEY = 'AIzaSyA8I155Js5gNoCQc3vwyF6PlViagRU4QNk';
     const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
     const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest';
 
     // DOM elements
-    let authorizeButton, signoutButton, eventsList, statusDiv;
+    const authorizeButton = document.getElementById('authorize_button');
+    const signoutButton = document.getElementById('signout_button');
+    const eventsList = document.getElementById('events');
+    const statusDiv = document.getElementById('status');
+
+    // State variables
     let gapiLoaded = false;
     let gisLoaded = false;
     let tokenClient;
 
+    // Show error messages
+    function showError(message) {
+      statusDiv.textContent = message;
+      statusDiv.className = 'error';
+      eventsList.innerHTML = '';
+    }
+
     // Initialize Google API Client
     function initGapi() {
       console.log('Google API Client script loaded.');
-      gapi.load('client', async () => {
+      if (!window.gapi) {
+        console.error('gapi is not defined.');
+        showError('Google API-skriptin lataus epäonnistui.');
+        return;
+      }
+      window.gapi.load('client', async () => {
         try {
           await gapi.client.init({
             apiKey: API_KEY,
@@ -46,10 +72,10 @@
           });
           gapiLoaded = true;
           console.log('Google API Client initialized.');
-          checkInitialization();
+          showButtonIfReady();
         } catch (error) {
-          console.error('Failed to initialize Google API Client:', error);
-          showError('Google API:n alustus epäonnistui. Tarkista API-avain.');
+          console.error('Google API Client initialization failed:', error);
+          showError(`Google API:n alustus epäonnistui: ${error.message || 'Tarkista API-avain.'}`);
         }
       });
     }
@@ -57,66 +83,48 @@
     // Initialize Google Identity Services
     function initGis() {
       console.log('Google Identity Services script loaded.');
+      if (!window.google || !window.google.accounts) {
+        console.error('google.accounts is not defined.');
+        showError('Google Identity Services -skriptin lataus epäonnistui.');
+        return;
+      }
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CLIENT_ID,
         scope: SCOPES,
         callback: (response) => {
           if (response.error) {
             console.error('Authentication error:', response);
-            showError('Kirjautuminen epäonnistui. Yritä uudelleen.');
+            showError('Authentication error details:', error);
             return;
           }
           console.log('Authentication successful, access token received.');
           gapi.client.setToken({ access_token: response.access_token });
           fetchEvents();
           authorizeButton.style.display = 'none';
-          signoutButton.style.display = 'inline-block';
+          signoutButton.style.display = 'block';
         },
       });
       gisLoaded = true;
       console.log('Google Identity Services initialized.');
-      checkInitialization();
+      showButtonIfReady();
     }
 
-    // Check if both libraries are loaded and show the authorize button
-    function checkInitialization() {
+    // Show authorize button if both libraries are loaded
+    function showButtonIfReady() {
       console.log('Checking initialization: gapiLoaded=', gapiLoaded, 'gisLoaded=', gisLoaded);
       if (gapiLoaded && gisLoaded) {
         console.log('Both libraries initialized, showing authorize button.');
-        authorizeButton.style.display = 'inline-block';
-        statusDiv.textContent = '';
-      } else {
-        // Retry initialization if libraries haven't loaded
-        setTimeout(checkInitialization, 1000);
+        authorizeButton();
       }
     }
 
-    // Handle sign-in button click
-    function setupButtons() {
-      authorizeButton = document.getElementById('authorize_button');
-      signoutButton = document.getElementById('signout_button');
-      eventsList = document.getElementById('events');
-      statusDiv = document.getElementById('status');
-
-      authorizeButton.onclick = () => {
-        console.log('Sign-in button clicked, requesting access token.');
-        tokenClient.requestAccessToken({ prompt: 'select_account' });
-      };
-
-      signoutButton.onclick = () => {
-        console.log('Sign-out button clicked.');
-        gapi.client.setToken(null);
-        google.accounts.oauth2.revoke(tokenClient.access_token, () => {
-          console.log('Access token revoked.');
-        });
-        eventsList.innerHTML = '';
-        statusDiv.textContent = '';
-        authorizeButton.style.display = 'inline-block';
-        signoutButton.style.display = 'none';
-      };
+    // Force show authorize button
+    function authorizeButton() {
+      authorizeButton.style.display = 'block';
+      statusDiv.textContent = '';
     }
 
-    // Fetch and display all-day or multi-day events
+    // Fetch and display events
     async function fetchEvents() {
       console.log('Fetching calendar events.');
       statusDiv.textContent = 'Ladataan tapahtumia...';
@@ -162,31 +170,70 @@
         }
       } catch (error) {
         console.error('Failed to fetch events:', error);
-        showError('Tapahtumien hakeminen epäonnistui. Tarkista yhteys tai oikeudet.');
+        showError(`Tapahtumien hakeminen epäonnistui: ${error.message || 'Tarkista yhteys tai oikeudet.'}`);
       }
     }
 
-    // Display error messages to the user
-    function showError(message) {
-      statusDiv.textContent = message;
-      statusDiv.className = 'error';
-      eventsList.innerHTML = '';
-    }
+    // Setup button handlers
+    authorizeButton.onclick = () => {
+      console.log('Sign-in button clicked.');
+      if (!tokenClient) {
+        console.error('tokenClient not initialized.');
+        showError('Kirjautuminen ei ole valmis. Yritä uudelleen hetken kuluttua.');
+        return;
+      }
+      tokenClient.requestAccessToken({ prompt: 'select_account' });
+    };
 
-    // Initialize DOM elements after page load
-    document.addEventListener('DOMContentLoaded', setupButtons);
+    signoutButton.onclick = () => {
+      console.log('Sign-out button clicked.');
+      gapi.client.setToken(null);
+      if (tokenClient) {
+        google.accounts.oauth2.revoke(tokenClient.access_token, () => {
+          console.log('Access token revoked.');
+        });
+      }
+      eventsList.innerHTML = '';
+      statusDiv.textContent = '';
+      authorizeButton.style.display = 'block';
+      signoutButton.style.display = 'none';
+    };
+
+    // Load scripts and initialize
+    window.onload = () => {
+      console.log('Window loaded, initializing scripts.');
+      const gapiScript = document.createElement('script');
+      gapiScript.src = 'https://apis.google.com/js/api.js';
+      gapiScript.async = true;
+      gapiScript.defer = true;
+      gapiScript.onload = initGapi;
+      gapiScript.onerror = () => {
+        console.error('Failed to load gapi script.');
+        showError('Google API-skriptin lataus epäonnistui.');
+      };
+      document.head.appendChild(gapiScript);
+
+      const gisScript = document.createElement('script');
+      gisScript.src = 'https://accounts.google.com/gsi/client';
+      gisScript.async = true;
+      gisScript.defer = true;
+      gisScript.onload = initGis;
+      gisScript.onerror = () => {
+        console.error('Failed to load GIS script.');
+        showError('Google Identity Services -skriptin lataus epäonnistui.');
+      };
+      document.head.appendChild(gisScript);
+
+      // Fallback: Show button after 5 seconds if initialization fails
+      setTimeout(() => {
+        if (!gapiLoaded || !gisLoaded) {
+          console.warn('Libraries not fully initialized, showing button anyway.');
+          authorizeButton.style.display = 'block';
+          statusDiv.textContent = 'Yhteys Googleen ei täysin valmis, mutta voit yrittää kirjautua.';
+          statusDiv.className = 'loading';
+        }
+      }, 5000);
+    };
   </script>
-  <!-- Load external scripts after defining functions -->
-  <script src="https://apis.google.com/js/api.js" async defer></script>
-  <script src="https://accounts.google.com/gsi/client" async defer></script>
-</head>
-<body>
-  <h2>Koko päivän ja pitkät tapahtumat</h2>
-  <div id="auth-buttons">
-    <button id="authorize_button" style="display: none;">Kirjaudu Googleen</button>
-    <button id="signout_button" style="display: none;">Kirjaudu ulos</button>
-  </div>
-  <div id="status"></div>
-  <ul id="events"></ul>
 </body>
 </html>
