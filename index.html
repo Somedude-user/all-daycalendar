@@ -21,19 +21,7 @@
     .error { color: red; }
     .loading { color: gray; }
   </style>
-  <!-- Load Google API Client and GIS libraries -->
-  <script src="https://apis.google.com/js/api.js" async defer onload="initGapi()"></script>
-  <script src="https://accounts.google.com/gsi/client" async defer onload="initGis()"></script>
-</head>
-<body>
-  <h2>Koko päivän ja pitkät tapahtumat</h2>
-  <div id="auth-buttons">
-    <button id="authorize_button" style="display: none;">Kirjaudu Googleen</button>
-    <button id="signout_button" style="display: none;">Kirjaudu ulos</button>
-  </div>
-  <div id="status"></div>
-  <ul id="events"></ul>
-
+  <!-- Define JavaScript logic before loading external scripts -->
   <script>
     // Configuration
     const CLIENT_ID = '369148508096-2i2l04iqj26c1sf3p68ktjlnptgel90t.apps.googleusercontent.com';
@@ -42,12 +30,7 @@
     const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest';
 
     // DOM elements
-    const authorizeButton = document.getElementById('authorize_button');
-    const signoutButton = document.getElementById('signout_button');
-    const eventsList = document.getElementById('events');
-    const statusDiv = document.getElementById('status');
-
-    // State variables
+    let authorizeButton, signoutButton, eventsList, statusDiv;
     let gapiLoaded = false;
     let gisLoaded = false;
     let tokenClient;
@@ -97,31 +80,41 @@
 
     // Check if both libraries are loaded and show the authorize button
     function checkInitialization() {
+      console.log('Checking initialization: gapiLoaded=', gapiLoaded, 'gisLoaded=', gisLoaded);
       if (gapiLoaded && gisLoaded) {
         console.log('Both libraries initialized, showing authorize button.');
         authorizeButton.style.display = 'inline-block';
         statusDiv.textContent = '';
+      } else {
+        // Retry initialization if libraries haven't loaded
+        setTimeout(checkInitialization, 1000);
       }
     }
 
     // Handle sign-in button click
-    authorizeButton.onclick = () => {
-      console.log('Sign-in button clicked.');
-      tokenClient.requestAccessToken({ prompt: '' });
-    };
+    function setupButtons() {
+      authorizeButton = document.getElementById('authorize_button');
+      signoutButton = document.getElementById('signout_button');
+      eventsList = document.getElementById('events');
+      statusDiv = document.getElementById('status');
 
-    // Handle sign-out button click
-    signoutButton.onclick = () => {
-      console.log('Sign-out button clicked.');
-      gapi.client.setToken(null);
-      google.accounts.oauth2.revoke(tokenClient.access_token, () => {
-        console.log('Access token revoked.');
-      });
-      eventsList.innerHTML = '';
-      statusDiv.textContent = '';
-      authorizeButton.style.display = 'inline-block';
-      signoutButton.style.display = 'none';
-    };
+      authorizeButton.onclick = () => {
+        console.log('Sign-in button clicked, requesting access token.');
+        tokenClient.requestAccessToken({ prompt: 'select_account' });
+      };
+
+      signoutButton.onclick = () => {
+        console.log('Sign-out button clicked.');
+        gapi.client.setToken(null);
+        google.accounts.oauth2.revoke(tokenClient.access_token, () => {
+          console.log('Access token revoked.');
+        });
+        eventsList.innerHTML = '';
+        statusDiv.textContent = '';
+        authorizeButton.style.display = 'inline-block';
+        signoutButton.style.display = 'none';
+      };
+    }
 
     // Fetch and display all-day or multi-day events
     async function fetchEvents() {
@@ -154,6 +147,7 @@
           const end = event.end.dateTime || event.end.date;
           const isAllDay = !!event.start.date;
           const isMultiDay = (new Date(end) - new Date(start)) > 24 * 60 * 60 * 1000;
+          console.log('Event:', event.summary, 'isAllDay:', isAllDay, 'isMultiDay:', isMultiDay);
 
           if (isAllDay || isMultiDay) {
             const li = document.createElement('li');
@@ -178,6 +172,21 @@
       statusDiv.className = 'error';
       eventsList.innerHTML = '';
     }
+
+    // Initialize DOM elements after page load
+    document.addEventListener('DOMContentLoaded', setupButtons);
   </script>
+  <!-- Load external scripts after defining functions -->
+  <script src="https://apis.google.com/js/api.js" async defer></script>
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+</head>
+<body>
+  <h2>Koko päivän ja pitkät tapahtumat</h2>
+  <div id="auth-buttons">
+    <button id="authorize_button" style="display: none;">Kirjaudu Googleen</button>
+    <button id="signout_button" style="display: none;">Kirjaudu ulos</button>
+  </div>
+  <div id="status"></div>
+  <ul id="events"></ul>
 </body>
 </html>
