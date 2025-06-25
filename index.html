@@ -1,114 +1,157 @@
 <!DOCTYPE html>
-<html>
+<html lang="fi">
 <head>
   <meta charset="utf-8" />
   <title>Koko päivän ja pitkät tapahtumat</title>
   <style>
-    body { font-family: Arial, sans-serif; padding: 1em; }
-    button { padding: 0.5em 1em; font-size: 1em; margin-top: 1em; }
-    ul { margin-top: 1em; }
+    body {
+      font-family: Arial, sans-serif;
+      padding: 1em;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    h2 { color: #333; }
+    button {
+      padding: 0.5em 1em;
+      font-size: 1em;
+      margin: 0.5em 0.5em 0.5em 0;
+      cursor: pointer;
+    }
+    ul { margin-top: 1em; padding-left: 20px; }
+    .error { color: red; }
+    .loading { color: gray; }
   </style>
-  <script src="https://apis.google.com/js/api.js" onload="gapiLoaded()"></script>
-  <script src="https://accounts.google.com/gsi/client" async defer onload="gisLoaded()"></script>
+  <!-- Load Google API Client and GIS libraries -->
+  <script src="https://apis.google.com/js/api.js" async defer onload="initGapi()"></script>
+  <script src="https://accounts.google.com/gsi/client" async defer onload="initGis()"></script>
 </head>
 <body>
   <h2>Koko päivän ja pitkät tapahtumat</h2>
-
-  <!-- Kirjautumis- ja uloskirjautumisnapit -->
-  <button id="authorize_button" style="display:none">Kirjaudu Googleen</button>
-  <button id="signout_button" style="display:none">Kirjaudu ulos</button>
-
+  <div id="auth-buttons">
+    <button id="authorize_button" style="display: none;">Kirjaudu Googleen</button>
+    <button id="signout_button" style="display: none;">Kirjaudu ulos</button>
+  </div>
+  <div id="status"></div>
   <ul id="events"></ul>
 
   <script>
+    // Configuration
     const CLIENT_ID = '369148508096-2i2l04iqj26c1sf3p68ktjlnptgel90t.apps.googleusercontent.com';
     const API_KEY = 'AIzaSyA8I155Js5gNoCQc3vwyF6PlViagRU4QNk';
     const SCOPES = 'https://www.googleapis.com/auth/calendar.readonly';
     const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/rest';
 
-    let tokenClient;
-    let gapiInited = false;
-    let gisInited = false;
-
+    // DOM elements
     const authorizeButton = document.getElementById('authorize_button');
     const signoutButton = document.getElementById('signout_button');
     const eventsList = document.getElementById('events');
+    const statusDiv = document.getElementById('status');
 
-    // Ladataan Google API Client
-    function gapiLoaded() {
-      gapi.load('client', initializeGapiClient);
-    }
+    // State variables
+    let gapiLoaded = false;
+    let gisLoaded = false;
+    let tokenClient;
 
-    async function initializeGapiClient() {
-      await gapi.client.init({
-        apiKey: API_KEY,
-        discoveryDocs: [DISCOVERY_DOC],
+    // Initialize Google API Client
+    function initGapi() {
+      console.log('Google API Client script loaded.');
+      gapi.load('client', async () => {
+        try {
+          await gapi.client.init({
+            apiKey: API_KEY,
+            discoveryDocs: [DISCOVERY_DOC],
+          });
+          gapiLoaded = true;
+          console.log('Google API Client initialized.');
+          checkInitialization();
+        } catch (error) {
+          console.error('Failed to initialize Google API Client:', error);
+          showError('Google API:n alustus epäonnistui. Tarkista API-avain.');
+        }
       });
-      gapiInited = true;
-      maybeEnableButtons();
     }
 
-    // Ladataan Google Identity Services kirjasto ja asetetaan tokenClient
-    function gisLoaded() {
+    // Initialize Google Identity Services
+    function initGis() {
+      console.log('Google Identity Services script loaded.');
       tokenClient = google.accounts.oauth2.initTokenClient({
         client_id: CLIENT_ID,
         scope: SCOPES,
-        callback: (tokenResponse) => {
-          if (tokenResponse.error) {
-            console.error('Token error:', tokenResponse);
+        callback: (response) => {
+          if (response.error) {
+            console.error('Authentication error:', response);
+            showError('Kirjautuminen epäonnistui. Yritä uudelleen.');
             return;
           }
-          gapi.client.setToken({ access_token: tokenResponse.access_token });
-          listUpcomingEvents();
+          console.log('Authentication successful, access token received.');
+          gapi.client.setToken({ access_token: response.access_token });
+          fetchEvents();
           authorizeButton.style.display = 'none';
           signoutButton.style.display = 'inline-block';
         },
       });
-      gisInited = true;
-      maybeEnableButtons();
+      gisLoaded = true;
+      console.log('Google Identity Services initialized.');
+      checkInitialization();
     }
 
-    // Näytetään kirjautumisnappi, kun molemmat kirjastot ovat ladattu
-    function maybeEnableButtons() {
-      if (gapiInited && gisInited) {
+    // Check if both libraries are loaded and show the authorize button
+    function checkInitialization() {
+      if (gapiLoaded && gisLoaded) {
+        console.log('Both libraries initialized, showing authorize button.');
         authorizeButton.style.display = 'inline-block';
+        statusDiv.textContent = '';
       }
     }
 
+    // Handle sign-in button click
     authorizeButton.onclick = () => {
+      console.log('Sign-in button clicked.');
       tokenClient.requestAccessToken({ prompt: '' });
     };
 
+    // Handle sign-out button click
     signoutButton.onclick = () => {
+      console.log('Sign-out button clicked.');
       gapi.client.setToken(null);
+      google.accounts.oauth2.revoke(tokenClient.access_token, () => {
+        console.log('Access token revoked.');
+      });
       eventsList.innerHTML = '';
+      statusDiv.textContent = '';
       authorizeButton.style.display = 'inline-block';
       signoutButton.style.display = 'none';
     };
 
-    // Haetaan ja näytetään tulevat koko päivän ja yli päivän kestävät tapahtumat
-    function listUpcomingEvents() {
-      const now = new Date().toISOString();
-      gapi.client.calendar.events.list({
-        calendarId: 'primary',
-        timeMin: now,
-        showDeleted: false,
-        singleEvents: true,
-        maxResults: 50,
-        orderBy: 'startTime',
-      }).then(response => {
-        const events = response.result.items;
-        eventsList.innerHTML = '';
+    // Fetch and display all-day or multi-day events
+    async function fetchEvents() {
+      console.log('Fetching calendar events.');
+      statusDiv.textContent = 'Ladataan tapahtumia...';
+      statusDiv.className = 'loading';
+      try {
+        const response = await gapi.client.calendar.events.list({
+          calendarId: 'primary',
+          timeMin: new Date().toISOString(),
+          showDeleted: false,
+          singleEvents: true,
+          maxResults: 50,
+          orderBy: 'startTime',
+        });
+        const events = response.result.items || [];
+        console.log('Events fetched:', events.length);
 
-        if (!events || events.length === 0) {
+        eventsList.innerHTML = '';
+        statusDiv.textContent = '';
+
+        if (events.length === 0) {
           eventsList.innerHTML = '<li>Ei tulevia koko päivän tai pidempiä tapahtumia.</li>';
           return;
         }
 
+        let hasRelevantEvents = false;
         events.forEach(event => {
           const start = event.start.dateTime || event.start.date;
           const end = event.end.dateTime || event.end.date;
-
           const isAllDay = !!event.start.date;
           const isMultiDay = (new Date(end) - new Date(start)) > 24 * 60 * 60 * 1000;
 
@@ -116,16 +159,24 @@
             const li = document.createElement('li');
             li.textContent = `${event.summary} (${start} - ${end})`;
             eventsList.appendChild(li);
+            hasRelevantEvents = true;
           }
         });
 
-        if (eventsList.children.length === 0) {
+        if (!hasRelevantEvents) {
           eventsList.innerHTML = '<li>Ei tulevia koko päivän tai pidempiä tapahtumia.</li>';
         }
-      }, err => {
-        console.error('Tapahtumien hakeminen epäonnistui:', err);
-        eventsList.innerHTML = '<li>Tapahtumien hakeminen epäonnistui.</li>';
-      });
+      } catch (error) {
+        console.error('Failed to fetch events:', error);
+        showError('Tapahtumien hakeminen epäonnistui. Tarkista yhteys tai oikeudet.');
+      }
+    }
+
+    // Display error messages to the user
+    function showError(message) {
+      statusDiv.textContent = message;
+      statusDiv.className = 'error';
+      eventsList.innerHTML = '';
     }
   </script>
 </body>
